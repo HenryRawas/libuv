@@ -1828,8 +1828,6 @@ void uv_remove_ares_handle(uv_ares_t* handle) {
 /* thread pool callback when socket is signalled */
 VOID CALLBACK uv_ares_socksignalTP(PVOID lpParameter,
                                   BOOLEAN timerfired) {
-  assert(!timerfired);
-
   assert(lpParameter != NULL);
 
   if (lpParameter != NULL) {
@@ -1850,6 +1848,9 @@ VOID CALLBACK uv_ares_socksignalTP(PVOID lpParameter,
 void uv_ares_sockstateCb(void *data, ares_socket_t sock, int read, int write) {
   /* look to see if we have a handle for this socket in our list */
   uv_ares_t* uv_handle_ares = uv_find_ares_handle(sock);
+  struct timeval tv;
+  struct timeval* tvptr;
+  int timeoutms = 0;
 
   if (read == 0 && write == 0) {
     /* if read and write are 0, cleanup existing data */
@@ -1911,12 +1912,19 @@ void uv_ares_sockstateCb(void *data, ares_socket_t sock, int read, int write) {
       uv_add_ares_handle(uv_handle_ares);
       uv_refs_++;
 
+      tv.tv_sec = 0;
+      tvptr = ares_timeout(((uv_ares_channel_t*)data)->channel, NULL, &tv);
+      if (tvptr) {
+        timeoutms = (tvptr->tv_sec * 1000) + (tvptr->tv_usec / 1000);
+      } else {
+        timeoutms = 20000;    /* 20 seconds max */
+      }
       /* specify thread pool function to call when event is signaled */
       if (RegisterWaitForSingleObject(&uv_handle_ares->hWait,
                                   uv_handle_ares->hEvent,
                                   uv_ares_socksignalTP,
                                   (void*)&uv_handle_ares->ares_req,
-                                  INFINITE, 
+                                  timeoutms, 
                                   WT_EXECUTEINWAITTHREAD) == 0) {
         uv_fatal_error(GetLastError(), "RegisterWaitForSingleObject");
       }
@@ -1927,7 +1935,6 @@ void uv_ares_sockstateCb(void *data, ares_socket_t sock, int read, int write) {
       uv_handle_ares->write = write;
       assert(uv_handle_ares->type == UV_ARES);
       assert(uv_handle_ares->data != NULL);
-      assert(uv_handle_ares->hWait == NULL);
       assert(uv_handle_ares->hEvent != WSA_INVALID_EVENT);
     }
     // TODO: do we need to set flags?

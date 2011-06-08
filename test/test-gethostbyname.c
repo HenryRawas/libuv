@@ -29,6 +29,9 @@
 ares_channel channel;
 struct ares_options options;
 int optmask;
+
+struct in_addr testsrv;
+
 void* uv_data;
 
 int ares_callbacks;
@@ -46,7 +49,6 @@ static void arescallback( void *arg,
                           int timeouts,
                           struct hostent *hostent) {
     int * iargs;
-    ASSERT(hostent != NULL);
     ASSERT(arg != NULL);
     iargs = (int*)arg;
     ASSERT(*iargs == 7);
@@ -67,7 +69,18 @@ TEST_IMPL(gethostbyname) {
 
   uv_init(alloc_cb);
 
-  optmask = 0;
+  /* for test, use echo server - TCP port TEST_PORT on loopback */
+  testsrv.S_un.S_un_b.s_b1 = 127;
+  testsrv.S_un.S_un_b.s_b2 = 0;
+  testsrv.S_un.S_un_b.s_b3 = 0;
+  testsrv.S_un.S_un_b.s_b4 = 1;
+
+  optmask = ARES_OPT_SERVERS | ARES_OPT_TCP_PORT | ARES_OPT_FLAGS;
+  options.servers = &testsrv;
+  options.nservers = 1;
+  options.tcp_port = htons(TEST_PORT);
+  options.flags = ARES_FLAG_USEVC;
+
   ares_callbacks = 0;
   printf("Uv init\n");
 

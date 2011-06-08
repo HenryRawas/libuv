@@ -90,6 +90,7 @@ TASK_LIST_START
 
   TEST_ENTRY  (get_currentexe)
 
+  TEST_HELPER (gethostbyname, echo_server)
   TEST_ENTRY  (gethostbyname)
 
 #if 0
