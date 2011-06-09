@@ -100,6 +100,7 @@ typedef struct uv_buf_t {
   int write;                              
 
 #define UV_ARES_TASK_PRIVATE_FIELDS       \
+  UV_IDLE_PRIVATE_FIELDS                  \
   uv_ares_task_t* ares_prev;              \
   uv_ares_task_t* ares_next;              \
   SOCKET sock;                            \

@@ -1876,6 +1876,25 @@ VOID CALLBACK uv_ares_socksignalTP(PVOID lpParameter,
   }
 }
 
+/* use this to wait for thread pool callbacks to complete, then free memory */
+void uv_ares_cleanup(uv_handle_t* handle, int status) {
+  uv_ares_task_t* uv_handle_ares = (uv_ares_task_t*)handle;
+
+  /* check for event complete without waiting */
+  unsigned int signaled = WaitForSingleObject(uv_handle_ares->h_close_event, 0);
+
+  if (signaled != WAIT_TIMEOUT) {
+    /* remove from idle list */
+    uv_idle_stop((uv_idle_t*)handle);
+
+    DEC_UV_REFS
+
+    /* close event handle and free uv handle memory */
+    CloseHandle(uv_handle_ares->h_close_event);
+    free(uv_handle_ares);
+  }
+}
+
 /* callback from ares when socket operation is started */
 void uv_ares_sockstateCb(void *data, ares_socket_t sock, int read, int write) {
   /* look to see if we have a handle for this socket in our list */
@@ -1887,11 +1906,11 @@ void uv_ares_sockstateCb(void *data, ares_socket_t sock, int read, int write) {
   if (read == 0 && write == 0) {
     /* if read and write are 0, cleanup existing data */
     if (uv_handle_ares != NULL) {
-      HANDLE hUnregevent = CreateEvent(NULL, FALSE, FALSE, NULL);
 
+      uv_handle_ares->h_close_event = CreateEvent(NULL, FALSE, FALSE, NULL);
       /* remove Wait */
       if (uv_handle_ares->h_wait) {
-        UnregisterWaitEx(uv_handle_ares->h_wait, hUnregevent);
+        UnregisterWaitEx(uv_handle_ares->h_wait, uv_handle_ares->h_close_event);
         uv_handle_ares->h_wait = NULL;
       }
 
@@ -1904,11 +1923,11 @@ void uv_ares_sockstateCb(void *data, ares_socket_t sock, int read, int write) {
       /* remove handle from list */
       uv_remove_ares_handle(uv_handle_ares);
 
-      WaitForSingleObject(hUnregevent, 100);   /* TODO: consider using uv_timer */ 
-      CloseHandle(hUnregevent);
-      free(uv_handle_ares);
+      /* we need to wait for running threads to complete before releasing socket handle */
+      /* convert this handle to an IDLE handle */
+      uv_handle_ares->type = UV_IDLE;
+      uv_idle_start((uv_idle_t*)uv_handle_ares, uv_ares_cleanup);
 
-      DEC_UV_REFS
     }
     else {
       assert(0);
