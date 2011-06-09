@@ -204,16 +204,20 @@ static char uv_zero_[] = "";
 /* ares integration */
 /* ares socket callback */
 void SockStateCb(void *data, ares_socket_t sock, int read, int write);
-void uv_ares_process(uv_ares_t* handle, uv_req_t* req);
+void uv_ares_process(uv_ares_action_t* handle, uv_req_t* req);
 
-/* list used for ares handles */
-static uv_ares_t* uv_ares_handles_ = NULL;
+/* list used for ares task handles */
+static uv_ares_task_t* uv_ares_handles_ = NULL;
 
 /* memory used per ares_channel */
 struct uv_ares_channel_s {
   ares_channel channel;
 };
 typedef struct uv_ares_channel_s uv_ares_channel_t;
+
+/* default timeout per socket request if ares does not specify value */
+/* use 20 sec */
+#define ARES_TIMEOUT_MS            20000
 
 
 /* Atomic set operation on char */
@@ -1594,7 +1598,7 @@ static void uv_process_reqs() {
         break;
 
       case UV_ARES:
-        uv_ares_process((uv_ares_t*)handle, req);
+        uv_ares_process((uv_ares_action_t*)handle, req);
         break;
 
       default:
@@ -1788,7 +1792,7 @@ done:
 
 
 /* find matching ares handle in list */
-void uv_add_ares_handle(uv_ares_t* handle) {
+void uv_add_ares_handle(uv_ares_task_t* handle) {
   handle->ares_next = uv_ares_handles_;
   handle->ares_prev = NULL;
 
@@ -1800,8 +1804,8 @@ void uv_add_ares_handle(uv_ares_t* handle) {
 
 /* find matching ares handle in list */
 /* TODO: faster lookup */
-uv_ares_t* uv_find_ares_handle(ares_socket_t sock) {
-  uv_ares_t* handle = uv_ares_handles_;
+uv_ares_task_t* uv_find_ares_handle(ares_socket_t sock) {
+  uv_ares_task_t* handle = uv_ares_handles_;
   while (handle != NULL) {
     if (handle->sock == sock) {
       break;
@@ -1813,7 +1817,7 @@ uv_ares_t* uv_find_ares_handle(ares_socket_t sock) {
 }
 
 /* remove ares handle in list */
-void uv_remove_ares_handle(uv_ares_t* handle) {
+void uv_remove_ares_handle(uv_ares_task_t* handle) {
   if (handle == uv_ares_handles_) {
     uv_ares_handles_ = handle->ares_next;
   }
@@ -1831,23 +1835,21 @@ void uv_remove_ares_handle(uv_ares_t* handle) {
 VOID CALLBACK uv_ares_socksignalTP(PVOID lpParameter,
                                   BOOLEAN timerfired) {
   WSANETWORKEVENTS NetworkEvents;
-  uv_ares_t* sockhandle;
-  uv_ares_t* selhandle;
+  uv_ares_task_t* sockhandle;
+  uv_ares_action_t* selhandle;
+  uv_req_t* uv_ares_req;
 
   assert(lpParameter != NULL);
 
   if (lpParameter != NULL) {
-    uv_req_t* uv_ares_req = (uv_req_t*)lpParameter;
+    uv_ares_task_t* sockhandle = (uv_ares_task_t*)lpParameter;
 
-    assert(uv_ares_req->handle != NULL);
-
-    sockhandle = (uv_ares_t*)uv_ares_req->handle;
     if (WSAEnumNetworkEvents(sockhandle->sock, sockhandle->h_event, &NetworkEvents) != 0) {
       uv_fatal_error(WSAGetLastError(), "WSAEnumNetworkEvents");
     }
 
     /* setup new handle */
-    selhandle = (uv_ares_t*)malloc(sizeof(uv_ares_t));
+    selhandle = (uv_ares_action_t*)malloc(sizeof(uv_ares_action_t));
     if (selhandle == NULL) {
       uv_fatal_error(ERROR_OUTOFMEMORY, "malloc");
     }
@@ -1877,7 +1879,7 @@ VOID CALLBACK uv_ares_socksignalTP(PVOID lpParameter,
 /* callback from ares when socket operation is started */
 void uv_ares_sockstateCb(void *data, ares_socket_t sock, int read, int write) {
   /* look to see if we have a handle for this socket in our list */
-  uv_ares_t* uv_handle_ares = uv_find_ares_handle(sock);
+  uv_ares_task_t* uv_handle_ares = uv_find_ares_handle(sock);
   struct timeval tv;
   struct timeval* tvptr;
   int timeoutms = 0;
@@ -1913,10 +1915,9 @@ void uv_ares_sockstateCb(void *data, ares_socket_t sock, int read, int write) {
     }
   }
   else {
-    uv_req_t* uv_req_ares;
     if (uv_handle_ares == NULL) {
       /* setup new handle */
-      uv_handle_ares = (uv_ares_t*)malloc(sizeof(uv_ares_t));
+      uv_handle_ares = (uv_ares_task_t*)malloc(sizeof(uv_ares_task_t));
       if (uv_handle_ares == NULL) {
         uv_fatal_error(ERROR_OUTOFMEMORY, "malloc");
       }
@@ -1928,10 +1929,6 @@ void uv_ares_sockstateCb(void *data, ares_socket_t sock, int read, int write) {
       uv_handle_ares->write = write;
       uv_handle_ares->h_wait = NULL;
       uv_handle_ares->flags = 0;
-
-      uv_req_ares = &uv_handle_ares->ares_req;
-      uv_req_init(uv_req_ares, (uv_handle_t*)uv_handle_ares, NULL);
-      uv_req_ares->type = UV_WAKEUP;
 
       /* create an event to wait on socket signal */
       uv_handle_ares->h_event = WSACreateEvent();     // TODO WSACloseEvent
@@ -1953,13 +1950,13 @@ void uv_ares_sockstateCb(void *data, ares_socket_t sock, int read, int write) {
       if (tvptr) {
         timeoutms = (tvptr->tv_sec * 1000) + (tvptr->tv_usec / 1000);
       } else {
-        timeoutms = 10000;    /* 10 seconds max */
+        timeoutms = ARES_TIMEOUT_MS;
       }
       /* specify thread pool function to call when event is signaled */
       if (RegisterWaitForSingleObject(&uv_handle_ares->h_wait,
                                   uv_handle_ares->h_event,
                                   uv_ares_socksignalTP,
-                                  (void*)&uv_handle_ares->ares_req,
+                                  (void*)uv_handle_ares,
                                   timeoutms, 
                                   WT_EXECUTEINWAITTHREAD) == 0) {
         uv_fatal_error(GetLastError(), "RegisterWaitForSingleObject");
@@ -1976,7 +1973,7 @@ void uv_ares_sockstateCb(void *data, ares_socket_t sock, int read, int write) {
 }
 
 /* called via uv_poll when ares completion port signaled */
-void uv_ares_process(uv_ares_t* handle, uv_req_t* req) {
+void uv_ares_process(uv_ares_action_t* handle, uv_req_t* req) {
 
   ares_process_fd( (ares_channel)handle->data, 
                     handle->read ? handle->sock : INVALID_SOCKET,

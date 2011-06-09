@@ -45,7 +45,8 @@ typedef struct uv_prepare_s uv_prepare_t;
 typedef struct uv_check_s uv_check_t;
 typedef struct uv_idle_s uv_idle_t;
 typedef struct uv_req_s uv_req_t;
-typedef struct uv_ares_s uv_ares_t;
+typedef struct uv_ares_task_s uv_ares_task_t;
+typedef struct uv_ares_action_s uv_ares_action_t;
 
 
 #if defined(__unix__) || defined(__POSIX__) || defined(__APPLE__)
@@ -347,9 +348,17 @@ int64_t uv_timer_get_repeat(uv_timer_t* timer);
 /*
  * Subclass of uv_handle_t. Used for integration of c-ares.
  */
-struct uv_ares_s {
+struct uv_ares_task_s {
   UV_HANDLE_FIELDS
-  UV_ARES_PRIVATE_FIELDS
+  UV_ARES_TASK_PRIVATE_FIELDS
+};
+
+/*
+ * Subclass of uv_handle_t. Used for integration of c-ares.
+ */
+struct uv_ares_action_s {
+  UV_HANDLE_FIELDS
+  UV_ARES_ACTION_PRIVATE_FIELDS
 };
 
 /* c-ares integration initialize and terminate */
@@ -400,7 +409,8 @@ union uv_any_handle {
   uv_idle_t idle;
   uv_async_t async;
   uv_timer_t timer;
-  uv_ares_t ares;
+  uv_ares_task_t arest;
+  uv_ares_action_t aresa;
 };
 
 /* Diagnostic counters */
