@@ -1299,3 +1299,16 @@ int uv_get_exepath(char* buffer, size_t* size) {
 }
 
 
+/* c-ares integration initialize and terminate */
+int uv_ares_init_options(void **uv_data_ptr,
+                        ares_channel *channelptr,
+                        struct ares_options *options,
+                        int optmask) {
+  rc = ares_init_options(channelptr, options, optmask);
+  return rc;
+}
+
+void uv_ares_destroy(void* uv_data,
+                    ares_channel channel) {
+  ares_destroy(channel);
+}
