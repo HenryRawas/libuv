@@ -36,8 +36,9 @@ static uv_tcp_t server;
 
 
 static void after_write(uv_req_t* req, int status);
-static void after_read(uv_tcp_t*, int nread, uv_buf_t buf);
-static void on_close(uv_handle_t* peer, int status);
+static void after_read(uv_tcp_t*, ssize_t nread, uv_buf_t buf);
+static void on_close(uv_handle_t* peer);
+static void on_server_close(uv_handle_t* handle);
 static void on_connection(uv_tcp_t*, int status);
 
 
@@ -59,12 +60,12 @@ static void after_write(uv_req_t* req, int status) {
 
 
 static void after_shutdown(uv_req_t* req, int status) {
-  uv_close(req->handle);
+  uv_close(req->handle, on_close);
   free(req);
 }
 
 
-static void after_read(uv_tcp_t* handle, int nread, uv_buf_t buf) {
+static void after_read(uv_tcp_t* handle, ssize_t nread, uv_buf_t buf) {
   int i;
   write_req_t *wr;
   uv_req_t* req;
@@ -94,7 +95,7 @@ static void after_read(uv_tcp_t* handle, int nread, uv_buf_t buf) {
   if (!server_closed) {
     for (i = 0; i < nread; i++) {
       if (buf.base[i] == 'Q') {
-        uv_close((uv_handle_t*)&server);
+        uv_close((uv_handle_t*)&server, on_server_close);
         server_closed = 1;
       }
     }
@@ -104,10 +105,8 @@ static void after_read(uv_tcp_t* handle, int nread, uv_buf_t buf) {
 }
 
 
-static void on_close(uv_handle_t* peer, int status) {
-  if (status != 0) {
-    fprintf(stdout, "Socket error\n");
-  }
+static void on_close(uv_handle_t* peer) {
+  free(peer);
 }
 
 
@@ -128,7 +127,7 @@ static void on_connection(uv_tcp_t* server, int status) {
   handle = (uv_tcp_t*) malloc(sizeof *handle);
   ASSERT(handle != NULL);
 
-  r = uv_accept(server, handle, on_close, NULL);
+  r = uv_accept(server, handle);
   ASSERT(r == 0);
 
   r = uv_read_start(handle, echo_alloc, after_read);
@@ -136,9 +135,8 @@ static void on_connection(uv_tcp_t* server, int status) {
 }
 
 
-static void on_server_close(uv_handle_t* handle, int status) {
+static void on_server_close(uv_handle_t* handle) {
   ASSERT(handle == (uv_handle_t*)&server);
-  ASSERT(status == 0);
 }
 
 
@@ -146,7 +144,7 @@ static int noecho_start(int port) {
   struct sockaddr_in addr = uv_ip4_addr("0.0.0.0", port);
   int r;
 
-  r = uv_tcp_init(&server, on_server_close, NULL);
+  r = uv_tcp_init(&server);
   if (r) {
     /* TODO: Error codes */
     fprintf(stderr, "Socket creation error\n");

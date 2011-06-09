@@ -189,9 +189,7 @@ static char* uv_err_str_ = NULL;
 
 
 /* Reference count that keeps the event loop alive */
-static LONG volatile uv_refs_ = 0;
-#define INC_UV_REFS   InterlockedIncrement(&uv_refs_);
-#define DEC_UV_REFS   InterlockedDecrement(&uv_refs_);
+static int uv_refs_ = 0;
 
 /* Ip address used to bind to any port at any interface */
 static struct sockaddr_in uv_addr_ip4_any_;
@@ -205,6 +203,7 @@ static char uv_zero_[] = "";
 /* ares socket callback */
 void SockStateCb(void *data, ares_socket_t sock, int read, int write);
 void uv_ares_process(uv_ares_action_t* handle, uv_req_t* req);
+void uv_ares_task_cleanup(uv_ares_action_t* handle, uv_req_t* req);
 
 /* list used for ares task handles */
 static uv_ares_task_t* uv_ares_handles_ = NULL;
@@ -213,6 +212,7 @@ static uv_ares_task_t* uv_ares_handles_ = NULL;
 struct uv_ares_channel_s {
   ares_channel channel;
 };
+
 typedef struct uv_ares_channel_s uv_ares_channel_t;
 
 /* default timeout per socket request if ares does not specify value */
@@ -504,7 +504,7 @@ static int uv_tcp_set_socket(uv_tcp_t* handle, SOCKET socket) {
   }
 
   handle->socket = socket;
-  INC_UV_REFS
+  uv_refs_++;
 
   return 0;
 }
@@ -571,7 +571,7 @@ static void uv_tcp_endgame(uv_tcp_t* handle) {
       handle->close_cb((uv_handle_t*)handle);
     }
 
-    DEC_UV_REFS
+    uv_refs_--;
   }
 }
 
@@ -585,7 +585,7 @@ static void uv_timer_endgame(uv_timer_t* handle) {
       handle->close_cb((uv_handle_t*)handle);
     }
 
-    DEC_UV_REFS
+    uv_refs_--;
   }
 }
 
@@ -599,7 +599,7 @@ static void uv_loop_endgame(uv_handle_t* handle) {
       handle->close_cb(handle);
     }
 
-    DEC_UV_REFS
+    uv_refs_--;
   }
 }
 
@@ -614,7 +614,7 @@ static void uv_async_endgame(uv_async_t* handle) {
       handle->close_cb((uv_handle_t*)handle);
     }
 
-    DEC_UV_REFS
+    uv_refs_--;
   }
 }
 
@@ -1284,7 +1284,7 @@ int uv_timer_init(uv_timer_t* handle) {
   handle->timer_cb = NULL;
   handle->repeat = 0;
 
-  INC_UV_REFS
+  uv_refs_++;
 
   return 0;
 }
@@ -1377,7 +1377,7 @@ int uv_loop_init(uv_handle_t* handle) {
   handle->flags = 0;
   handle->error = uv_ok_;
 
-  INC_UV_REFS
+  uv_refs_++;
 
   return 0;
 }
@@ -1538,7 +1538,7 @@ int uv_async_init(uv_async_t* handle, uv_async_cb async_cb) {
   uv_req_init(req, (uv_handle_t*)handle, async_cb);
   req->type = UV_WAKEUP;
 
-  INC_UV_REFS
+  uv_refs_++;
 
   return 0;
 }
@@ -1599,6 +1599,10 @@ static void uv_process_reqs() {
 
       case UV_ARES:
         uv_ares_process((uv_ares_action_t*)handle, req);
+        break;
+
+      case UV_ARES_TASK:
+        uv_ares_task_cleanup((uv_ares_action_t*)handle, req);
         break;
 
       default:
@@ -1732,12 +1736,12 @@ int uv_run() {
 
 
 void uv_ref() {
-  INC_UV_REFS
+  uv_refs_++;
 }
 
 
 void uv_unref() {
-  DEC_UV_REFS
+  uv_refs_--;
 }
 
 
@@ -1844,6 +1848,7 @@ VOID CALLBACK uv_ares_socksignalTP(PVOID lpParameter,
   if (lpParameter != NULL) {
     uv_ares_task_t* sockhandle = (uv_ares_task_t*)lpParameter;
 
+    /* clear socket status for this event */
     if (WSAEnumNetworkEvents(sockhandle->sock, sockhandle->h_event, &NetworkEvents) != 0) {
       uv_fatal_error(WSAGetLastError(), "WSAEnumNetworkEvents");
     }
@@ -1864,8 +1869,7 @@ VOID CALLBACK uv_ares_socksignalTP(PVOID lpParameter,
     uv_req_init(uv_ares_req, (uv_handle_t*)selhandle, NULL);
     uv_ares_req->type = UV_WAKEUP;
 
-    INC_UV_REFS
-
+    /* post ares needs to called */
     if (!PostQueuedCompletionStatus(uv_iocp_,
                                     0,
                                     0,
@@ -1873,26 +1877,6 @@ VOID CALLBACK uv_ares_socksignalTP(PVOID lpParameter,
       uv_fatal_error(GetLastError(), "PostQueuedCompletionStatus");
     }
 
-  }
-}
-
-/* use this to wait for thread pool callbacks to complete, then free memory.
- Invoked as uv_idle */
-void uv_ares_cleanup(uv_handle_t* handle, int status) {
-  uv_ares_task_t* uv_handle_ares = (uv_ares_task_t*)handle;
-
-  /* check for event complete without waiting */
-  unsigned int signaled = WaitForSingleObject(uv_handle_ares->h_close_event, 0);
-
-  if (signaled != WAIT_TIMEOUT) {
-    /* remove from idle list */
-    uv_idle_stop((uv_idle_t*)handle);
-
-    DEC_UV_REFS
-
-    /* close event handle and free uv handle memory */
-    CloseHandle(uv_handle_ares->h_close_event);
-    free(uv_handle_ares);
   }
 }
 
@@ -1907,6 +1891,7 @@ void uv_ares_sockstateCb(void *data, ares_socket_t sock, int read, int write) {
   if (read == 0 && write == 0) {
     /* if read and write are 0, cleanup existing data */
     if (uv_handle_ares != NULL) {
+      uv_req_t* uv_ares_req;
 
       uv_handle_ares->h_close_event = CreateEvent(NULL, FALSE, FALSE, NULL);
       /* remove Wait */
@@ -1924,11 +1909,18 @@ void uv_ares_sockstateCb(void *data, ares_socket_t sock, int read, int write) {
       /* remove handle from list */
       uv_remove_ares_handle(uv_handle_ares);
 
-      /* we need to wait for running threads to complete before releasing socket handle */
-      /* convert this handle to an IDLE handle, and add it to idle list */
-      uv_handle_ares->type = UV_IDLE;
-      uv_idle_start((uv_idle_t*)uv_handle_ares, uv_ares_cleanup);
+      // Post request to cleanup the Task
+      uv_ares_req = &uv_handle_ares->ares_req;
+      uv_req_init(uv_ares_req, (uv_handle_t*)uv_handle_ares, NULL);
+      uv_ares_req->type = UV_WAKEUP;
 
+      /* post ares done with socket - finish cleanup when all thread done. */
+      if (!PostQueuedCompletionStatus(uv_iocp_,
+                                      0,
+                                      0,
+                                      &uv_ares_req->overlapped)) {
+        uv_fatal_error(GetLastError(), "PostQueuedCompletionStatus");
+      }
     }
     else {
       assert(0);
@@ -1941,7 +1933,7 @@ void uv_ares_sockstateCb(void *data, ares_socket_t sock, int read, int write) {
       if (uv_handle_ares == NULL) {
         uv_fatal_error(ERROR_OUTOFMEMORY, "malloc");
       }
-      uv_handle_ares->type = UV_ARES;
+      uv_handle_ares->type = UV_ARES_TASK;
       uv_handle_ares->close_cb = NULL;
       uv_handle_ares->data = ((uv_ares_channel_t*)data)->channel;
       uv_handle_ares->sock = sock;
@@ -1963,7 +1955,7 @@ void uv_ares_sockstateCb(void *data, ares_socket_t sock, int read, int write) {
 
       /* add handle to list */
       uv_add_ares_handle(uv_handle_ares);
-      INC_UV_REFS
+      uv_refs_++;
 
       tv.tv_sec = 0;
       tvptr = ares_timeout(((uv_ares_channel_t*)data)->channel, NULL, &tv);
@@ -1984,7 +1976,7 @@ void uv_ares_sockstateCb(void *data, ares_socket_t sock, int read, int write) {
     }
     else {
       /* found existing handle.  */
-      assert(uv_handle_ares->type == UV_ARES);
+      assert(uv_handle_ares->type == UV_ARES_TASK);
       assert(uv_handle_ares->data != NULL);
       assert(uv_handle_ares->h_event != WSA_INVALID_EVENT);
     }
@@ -2000,8 +1992,33 @@ void uv_ares_process(uv_ares_action_t* handle, uv_req_t* req) {
   
   // release handle for select here 
   free(handle);
+}
 
-  DEC_UV_REFS
+/* called via uv_poll when ares is finished with socket */
+void uv_ares_task_cleanup(uv_ares_action_t* handle, uv_req_t* req) {
+
+  uv_ares_task_t* uv_handle_ares = (uv_ares_task_t*)handle;
+
+  /* check for event complete without waiting */
+  unsigned int signaled = WaitForSingleObject(uv_handle_ares->h_close_event, 0);
+
+  if (signaled != WAIT_TIMEOUT) {
+
+    uv_refs_--;
+
+    /* close event handle and free uv handle memory */
+    CloseHandle(uv_handle_ares->h_close_event);
+    free(uv_handle_ares);
+  }
+  else {
+    /* stil busy - repost and try again */
+    if (!PostQueuedCompletionStatus(uv_iocp_,
+                                    0,
+                                    0,
+                                    &req->overlapped)) {
+      uv_fatal_error(GetLastError(), "PostQueuedCompletionStatus");
+    }
+  }
 }
 
 /* set ares SOCK_STATE callback to our handler */
