@@ -1876,7 +1876,8 @@ VOID CALLBACK uv_ares_socksignalTP(PVOID lpParameter,
   }
 }
 
-/* use this to wait for thread pool callbacks to complete, then free memory */
+/* use this to wait for thread pool callbacks to complete, then free memory.
+ Invoked as uv_idle */
 void uv_ares_cleanup(uv_handle_t* handle, int status) {
   uv_ares_task_t* uv_handle_ares = (uv_ares_task_t*)handle;
 
@@ -1924,7 +1925,7 @@ void uv_ares_sockstateCb(void *data, ares_socket_t sock, int read, int write) {
       uv_remove_ares_handle(uv_handle_ares);
 
       /* we need to wait for running threads to complete before releasing socket handle */
-      /* convert this handle to an IDLE handle */
+      /* convert this handle to an IDLE handle, and add it to idle list */
       uv_handle_ares->type = UV_IDLE;
       uv_idle_start((uv_idle_t*)uv_handle_ares, uv_ares_cleanup);
 
@@ -1987,7 +1988,6 @@ void uv_ares_sockstateCb(void *data, ares_socket_t sock, int read, int write) {
       assert(uv_handle_ares->data != NULL);
       assert(uv_handle_ares->h_event != WSA_INVALID_EVENT);
     }
-    // TODO: do we need to set flags?
   }
 }
 
