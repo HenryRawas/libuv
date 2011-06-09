@@ -189,8 +189,9 @@ static char* uv_err_str_ = NULL;
 
 
 /* Reference count that keeps the event loop alive */
-static int uv_refs_ = 0;
-
+static LONG volatile uv_refs_ = 0;
+#define INC_UV_REFS   InterlockedIncrement(&uv_refs_);
+#define DEC_UV_REFS   InterlockedDecrement(&uv_refs_);
 
 /* Ip address used to bind to any port at any interface */
 static struct sockaddr_in uv_addr_ip4_any_;
@@ -499,6 +500,7 @@ static int uv_tcp_set_socket(uv_tcp_t* handle, SOCKET socket) {
   }
 
   handle->socket = socket;
+  INC_UV_REFS
 
   return 0;
 }
@@ -565,7 +567,7 @@ static void uv_tcp_endgame(uv_tcp_t* handle) {
       handle->close_cb((uv_handle_t*)handle);
     }
 
-    uv_refs_--;
+    DEC_UV_REFS
   }
 }
 
@@ -579,7 +581,7 @@ static void uv_timer_endgame(uv_timer_t* handle) {
       handle->close_cb((uv_handle_t*)handle);
     }
 
-    uv_refs_--;
+    DEC_UV_REFS
   }
 }
 
@@ -593,7 +595,7 @@ static void uv_loop_endgame(uv_handle_t* handle) {
       handle->close_cb(handle);
     }
 
-    uv_refs_--;
+    DEC_UV_REFS
   }
 }
 
@@ -608,7 +610,7 @@ static void uv_async_endgame(uv_async_t* handle) {
       handle->close_cb((uv_handle_t*)handle);
     }
 
-    uv_refs_--;
+    DEC_UV_REFS
   }
 }
 
@@ -1278,7 +1280,7 @@ int uv_timer_init(uv_timer_t* handle) {
   handle->timer_cb = NULL;
   handle->repeat = 0;
 
-  uv_refs_++;
+  INC_UV_REFS
 
   return 0;
 }
@@ -1371,7 +1373,7 @@ int uv_loop_init(uv_handle_t* handle) {
   handle->flags = 0;
   handle->error = uv_ok_;
 
-  uv_refs_++;
+  INC_UV_REFS
 
   return 0;
 }
@@ -1532,7 +1534,7 @@ int uv_async_init(uv_async_t* handle, uv_async_cb async_cb) {
   uv_req_init(req, (uv_handle_t*)handle, async_cb);
   req->type = UV_WAKEUP;
 
-  uv_refs_++;
+  INC_UV_REFS
 
   return 0;
 }
@@ -1726,12 +1728,12 @@ int uv_run() {
 
 
 void uv_ref() {
-  uv_refs_++;
+  INC_UV_REFS
 }
 
 
 void uv_unref() {
-  uv_refs_--;
+  DEC_UV_REFS
 }
 
 
@@ -1828,6 +1830,10 @@ void uv_remove_ares_handle(uv_ares_t* handle) {
 /* thread pool callback when socket is signalled */
 VOID CALLBACK uv_ares_socksignalTP(PVOID lpParameter,
                                   BOOLEAN timerfired) {
+  WSANETWORKEVENTS NetworkEvents;
+  uv_ares_t* sockhandle;
+  uv_ares_t* selhandle;
+
   assert(lpParameter != NULL);
 
   if (lpParameter != NULL) {
@@ -1835,12 +1841,36 @@ VOID CALLBACK uv_ares_socksignalTP(PVOID lpParameter,
 
     assert(uv_ares_req->handle != NULL);
 
+    sockhandle = (uv_ares_t*)uv_ares_req->handle;
+    if (WSAEnumNetworkEvents(sockhandle->sock, sockhandle->h_event, &NetworkEvents) != 0) {
+      uv_fatal_error(WSAGetLastError(), "WSAEnumNetworkEvents");
+    }
+
+    /* setup new handle */
+    selhandle = (uv_ares_t*)malloc(sizeof(uv_ares_t));
+    if (selhandle == NULL) {
+      uv_fatal_error(ERROR_OUTOFMEMORY, "malloc");
+    }
+    selhandle->type = UV_ARES;
+    selhandle->close_cb = NULL;
+    selhandle->data = sockhandle->data;
+    selhandle->sock = sockhandle->sock;
+    selhandle->read = (NetworkEvents.lNetworkEvents & (FD_READ | FD_CONNECT)) ? 1 : 0;
+    selhandle->write = (NetworkEvents.lNetworkEvents & (FD_WRITE | FD_CONNECT)) ? 1 : 0;
+
+    uv_ares_req = &selhandle->ares_req;
+    uv_req_init(uv_ares_req, (uv_handle_t*)selhandle, NULL);
+    uv_ares_req->type = UV_WAKEUP;
+
+    INC_UV_REFS
+
     if (!PostQueuedCompletionStatus(uv_iocp_,
                                     0,
                                     0,
                                     &uv_ares_req->overlapped)) {
       uv_fatal_error(GetLastError(), "PostQueuedCompletionStatus");
     }
+
   }
 }
 
@@ -1855,23 +1885,28 @@ void uv_ares_sockstateCb(void *data, ares_socket_t sock, int read, int write) {
   if (read == 0 && write == 0) {
     /* if read and write are 0, cleanup existing data */
     if (uv_handle_ares != NULL) {
-      /* remove Wiat */
-      if (uv_handle_ares->hWait) {
-        UnregisterWait(uv_handle_ares->hWait);
-        uv_handle_ares->hWait = NULL;
+      HANDLE hUnregevent = CreateEvent(NULL, FALSE, FALSE, NULL);
+
+      /* remove Wait */
+      if (uv_handle_ares->h_wait) {
+        UnregisterWaitEx(uv_handle_ares->h_wait, hUnregevent);
+        uv_handle_ares->h_wait = NULL;
       }
 
       /* detach socket from the event */
       WSAEventSelect(sock, NULL, 0);
-      if (uv_handle_ares->hEvent != WSA_INVALID_EVENT) {
-        WSACloseEvent(uv_handle_ares->hEvent);
-        uv_handle_ares->hEvent = WSA_INVALID_EVENT;
+      if (uv_handle_ares->h_event != WSA_INVALID_EVENT) {
+        WSACloseEvent(uv_handle_ares->h_event);
+        uv_handle_ares->h_event = WSA_INVALID_EVENT;
       }
-      /* remove handle from list and free it */
+      /* remove handle from list */
       uv_remove_ares_handle(uv_handle_ares);
+
+      WaitForSingleObject(hUnregevent, 100);   /* TODO: consider using uv_timer */ 
+      CloseHandle(hUnregevent);
       free(uv_handle_ares);
 
-      uv_refs_--;
+      DEC_UV_REFS
     }
     else {
       assert(0);
@@ -1887,41 +1922,42 @@ void uv_ares_sockstateCb(void *data, ares_socket_t sock, int read, int write) {
       }
       uv_handle_ares->type = UV_ARES;
       uv_handle_ares->close_cb = NULL;
-      uv_handle_ares->data = data;
+      uv_handle_ares->data = ((uv_ares_channel_t*)data)->channel;
       uv_handle_ares->sock = sock;
       uv_handle_ares->read = read;
       uv_handle_ares->write = write;
-      uv_handle_ares->hWait = NULL;
+      uv_handle_ares->h_wait = NULL;
+      uv_handle_ares->flags = 0;
 
       uv_req_ares = &uv_handle_ares->ares_req;
       uv_req_init(uv_req_ares, (uv_handle_t*)uv_handle_ares, NULL);
       uv_req_ares->type = UV_WAKEUP;
 
       /* create an event to wait on socket signal */
-      uv_handle_ares->hEvent = WSACreateEvent();     // TODO WSACloseEvent
-      if (uv_handle_ares->hEvent == WSA_INVALID_EVENT) {
+      uv_handle_ares->h_event = WSACreateEvent();     // TODO WSACloseEvent
+      if (uv_handle_ares->h_event == WSA_INVALID_EVENT) {
         uv_fatal_error(WSAGetLastError(), "WSACreateEvent");
       }
 
       /* tie event to socket */
-      if (SOCKET_ERROR == WSAEventSelect(sock, uv_handle_ares->hEvent, FD_READ | FD_WRITE | FD_CONNECT)) {
+      if (SOCKET_ERROR == WSAEventSelect(sock, uv_handle_ares->h_event, FD_READ | FD_WRITE | FD_CONNECT)) {
         uv_fatal_error(WSAGetLastError(), "WSAEventSelect");
       }
 
       /* add handle to list */
       uv_add_ares_handle(uv_handle_ares);
-      uv_refs_++;
+      INC_UV_REFS
 
       tv.tv_sec = 0;
       tvptr = ares_timeout(((uv_ares_channel_t*)data)->channel, NULL, &tv);
       if (tvptr) {
         timeoutms = (tvptr->tv_sec * 1000) + (tvptr->tv_usec / 1000);
       } else {
-        timeoutms = 20000;    /* 20 seconds max */
+        timeoutms = 10000;    /* 10 seconds max */
       }
       /* specify thread pool function to call when event is signaled */
-      if (RegisterWaitForSingleObject(&uv_handle_ares->hWait,
-                                  uv_handle_ares->hEvent,
+      if (RegisterWaitForSingleObject(&uv_handle_ares->h_wait,
+                                  uv_handle_ares->h_event,
                                   uv_ares_socksignalTP,
                                   (void*)&uv_handle_ares->ares_req,
                                   timeoutms, 
@@ -1930,12 +1966,10 @@ void uv_ares_sockstateCb(void *data, ares_socket_t sock, int read, int write) {
       }
     }
     else {
-      /* found existing handle. update read & write flags */
-      uv_handle_ares->read = read;
-      uv_handle_ares->write = write;
+      /* found existing handle.  */
       assert(uv_handle_ares->type == UV_ARES);
       assert(uv_handle_ares->data != NULL);
-      assert(uv_handle_ares->hEvent != WSA_INVALID_EVENT);
+      assert(uv_handle_ares->h_event != WSA_INVALID_EVENT);
     }
     // TODO: do we need to set flags?
   }
@@ -1943,12 +1977,15 @@ void uv_ares_sockstateCb(void *data, ares_socket_t sock, int read, int write) {
 
 /* called via uv_poll when ares completion port signaled */
 void uv_ares_process(uv_ares_t* handle, uv_req_t* req) {
-  ares_process_fd( ((uv_ares_channel_t*)handle->data)->channel, 
+
+  ares_process_fd( (ares_channel)handle->data, 
                     handle->read ? handle->sock : INVALID_SOCKET,
                     handle->write ?  handle->sock : INVALID_SOCKET);
   
-  // we do not release resources here. 
-  // assume that we get called with read == 0 and write == 0 to to close this activity
+  // release handle for select here 
+  free(handle);
+
+  DEC_UV_REFS
 }
 
 /* set ares SOCK_STATE callback to our handler */

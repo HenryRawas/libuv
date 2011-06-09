@@ -100,8 +100,10 @@ typedef struct uv_buf_t {
   SOCKET sock;                            \
   int read;                               \
   int write;                              \
-  HANDLE hWait;                           \
-  WSAEVENT hEvent;
+  long volatile pending;                  \
+  HANDLE h_wait;                          \
+  WSAEVENT h_event;                       \
+  HANDLE h_close_event;
 
 
 #define UV_PREPARE_PRIVATE_FIELDS /* empty */

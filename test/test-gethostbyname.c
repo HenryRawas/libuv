@@ -34,8 +34,10 @@ struct in_addr testsrv;
 
 void* uv_data;
 
-int ares_callbacks;
-
+int ares_bynamecallbacks;
+int bynamecallbacksig;
+int ares_byaddrcallbacks;
+int byaddrcallbacksig;
 
 static uv_buf_t alloc_cb(uv_handle_t* handle, size_t size) {
   uv_buf_t buf;
@@ -44,31 +46,48 @@ static uv_buf_t alloc_cb(uv_handle_t* handle, size_t size) {
   return buf;
 }
 
-static void arescallback( void *arg,
+static void aresbynamecallback( void *arg,
                           int status,
                           int timeouts,
                           struct hostent *hostent) {
     int * iargs;
     ASSERT(arg != NULL);
     iargs = (int*)arg;
-    ASSERT(*iargs == 7);
+    ASSERT(*iargs == bynamecallbacksig);
+    ASSERT(timeouts == 0);
 
-    ares_callbacks++;
+    ares_bynamecallbacks++;
 }
 
-TEST_IMPL(gethostbyname) {
+static void arestimeoutcallback( void *arg,
+                          int status,
+                          int timeouts,
+                          struct hostent *hostent) {
+    int * iargs;
+    ASSERT(arg != NULL);
+    iargs = (int*)arg;
+    ASSERT(*iargs == bynamecallbacksig);
+    ASSERT(timeouts > 0);
 
-  int sig = 7;
+    ares_bynamecallbacks++;
+}
+
+static void aresbyaddrcallback( void *arg,
+                          int status,
+                          int timeouts,
+                          struct hostent *hostent) {
+    int * iargs;
+    ASSERT(arg != NULL);
+    iargs = (int*)arg;
+    ASSERT(*iargs == byaddrcallbacksig);
+    ASSERT(timeouts == 0);
+
+    ares_byaddrcallbacks++;
+}
+
+static void prep_tcploopback()
+{
   int rc = 0;
-
-  rc = ares_library_init(ARES_LIB_INIT_ALL);
-  if (rc != 0) {
-    printf("ares library init fails %d\n", rc);
-    return 1;
-  }
-
-  uv_init(alloc_cb);
-
   /* for test, use echo server - TCP port TEST_PORT on loopback */
   testsrv.S_un.S_un_b.s_b1 = 127;
   testsrv.S_un.S_un_b.s_b2 = 0;
@@ -81,26 +100,169 @@ TEST_IMPL(gethostbyname) {
   options.tcp_port = htons(TEST_PORT);
   options.flags = ARES_FLAG_USEVC;
 
-  ares_callbacks = 0;
-  printf("Uv init\n");
+  rc = uv_ares_init_options(&uv_data, &channel, &options, optmask);
+
+  ASSERT(rc == ARES_SUCCESS);
+}
+
+static void prep_noecholoopback()
+{
+  int rc = 0;
+  /* for test, use echo server - TCP port TEST_PORT on loopback */
+  testsrv.S_un.S_un_b.s_b1 = 127;
+  testsrv.S_un.S_un_b.s_b2 = 0;
+  testsrv.S_un.S_un_b.s_b3 = 0;
+  testsrv.S_un.S_un_b.s_b4 = 1;
+
+  optmask = ARES_OPT_SERVERS | ARES_OPT_TCP_PORT | ARES_OPT_FLAGS;
+  options.servers = &testsrv;
+  options.nservers = 1;
+  options.tcp_port = htons(TEST_PORT_2);
+  options.flags = ARES_FLAG_USEVC;
 
   rc = uv_ares_init_options(&uv_data, &channel, &options, optmask);
-  printf("Uv ares init %d\n", rc);
+
   ASSERT(rc == ARES_SUCCESS);
+}
+
+
+
+TEST_IMPL(gethostbyname) {
+
+  int rc = 0;
+  char addr[4];
+
+  rc = ares_library_init(ARES_LIB_INIT_ALL);
+  if (rc != 0) {
+    printf("ares library init fails %d\n", rc);
+    return 1;
+  }
+
+  uv_init(alloc_cb);
+
+  printf("Start basic gethostbyname test\n");
+  prep_tcploopback();
+
+  ares_bynamecallbacks = 0;
+  bynamecallbacksig = 7;
 
   ares_gethostbyname(channel, 
                     "microsoft.com",
                     AF_INET,
-                    &arescallback,
-                    &sig);
-  printf("gethostbyname returned\n");
-
+                    &aresbynamecallback,
+                    &bynamecallbacksig);
   uv_run();
-  printf("Uv run completes\n");
+
+  ASSERT(ares_bynamecallbacks == 1);
 
   uv_ares_destroy(uv_data, channel);
+  printf("Done basic gethostbyname test\n");
 
-  ASSERT(ares_callbacks == 1);
+
+  /* two sequential call on new channel */
+
+  printf("Start gethostbyname and gethostbyaddr sequential test\n");
+  prep_tcploopback();
+
+  ares_bynamecallbacks = 0;
+  bynamecallbacksig = 7;
+
+  ares_gethostbyname(channel, 
+                    "microsoft.com",
+                    AF_INET,
+                    &aresbynamecallback,
+                    &bynamecallbacksig);
+  uv_run();
+
+  ASSERT(ares_bynamecallbacks == 1);
+
+
+  ares_byaddrcallbacks = 0;
+  byaddrcallbacksig = 8;
+  addr[0] = 10;
+  addr[1] = 0;
+  addr[2] = 1;
+  addr[3] = 99;
+
+  ares_gethostbyaddr(channel, 
+                    addr,
+                    4,
+                    AF_INET,
+                    &aresbyaddrcallback,
+                    &byaddrcallbacksig);
+
+  uv_run();
+
+  ASSERT(ares_byaddrcallbacks == 1);
+  
+  uv_ares_destroy(uv_data, channel);
+  printf("Done gethostbyname and gethostbyaddr sequential test\n");
+
+
+
+
+  /* two simultaneous calls on new channel */
+
+  printf("Start gethostbyname and gethostbyaddr concurrent test\n");
+  prep_tcploopback();
+
+  ares_bynamecallbacks = 0;
+  bynamecallbacksig = 7;
+
+  ares_gethostbyname(channel, 
+                    "microsoft.com",
+                    AF_INET,
+                    &aresbynamecallback,
+                    &bynamecallbacksig);
+
+  ares_byaddrcallbacks = 0;
+  byaddrcallbacksig = 8;
+  addr[0] = 10;
+  addr[1] = 0;
+  addr[2] = 1;
+  addr[3] = 99;
+
+  ares_gethostbyaddr(channel, 
+                    addr,
+                    4,
+                    AF_INET,
+                    &aresbyaddrcallback,
+                    &byaddrcallbacksig);
+
+  uv_run();
+
+  ASSERT(ares_bynamecallbacks == 1);
+  ASSERT(ares_byaddrcallbacks == 1);
+
+
+  uv_ares_destroy(uv_data, channel);
+  printf("Done gethostbyname and gethostbyaddr concurrent test\n");
+
+
+  /* test for timeout using noecho-server */
+  
+  // test runner has limit of 5 seconds, so we cannot include this test.
+
+  //printf("Start gethostbyname timeout test\n");
+  //prep_noecholoopback();
+
+  //ares_bynamecallbacks = 0;
+  //bynamecallbacksig = 7;
+
+  //ares_gethostbyname(channel, 
+  //                  "microsoft.com",
+  //                  AF_INET,
+  //                  &arestimeoutcallback,
+  //                  &bynamecallbacksig);
+  //uv_run();
+  //printf("Uv run completes\n");
+
+  //ASSERT(ares_bynamecallbacks == 1);
+
+  //uv_ares_destroy(uv_data, channel);
+  //printf("Done gethostbyname timeout test\n");
+
+
 
   return 0;
 }
