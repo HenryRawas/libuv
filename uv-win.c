@@ -1849,9 +1849,8 @@ VOID CALLBACK uv_ares_socksignalTP(PVOID lpParameter,
     uv_ares_task_t* sockhandle = (uv_ares_task_t*)lpParameter;
 
     /* clear socket status for this event */
-    if (WSAEnumNetworkEvents(sockhandle->sock, sockhandle->h_event, &NetworkEvents) != 0) {
-      uv_fatal_error(WSAGetLastError(), "WSAEnumNetworkEvents");
-    }
+    /* do not fail if error, thread may run after socket close */
+    WSAEnumNetworkEvents(sockhandle->sock, sockhandle->h_event, &NetworkEvents);
 
     /* setup new handle */
     selhandle = (uv_ares_action_t*)malloc(sizeof(uv_ares_action_t));

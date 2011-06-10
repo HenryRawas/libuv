@@ -37,10 +37,10 @@ void* uv_data;
 static void call_ares();
 
 int ares_callbacks;
+int ares_errors;
 int argument;
 
 #define NUM_CALLS_TO_START    100
-#define NUM_CALLS_TOTAL       1
 
 static int64_t start_time;
 static int64_t end_time;
@@ -51,10 +51,10 @@ static void aresbynamecallback( void *arg,
                           int timeouts,
                           struct hostent *hostent) {
     ares_callbacks++;
-
-    if (ares_callbacks < NUM_CALLS_TOTAL) {
-      call_ares();
+    if (status != 0) {
+      ares_errors++;
     }
+
 }
 
 /* actual call to ares */
@@ -70,6 +70,8 @@ static void call_ares() {
 static void prep_tcploopback()
 {
   int rc = 0;
+  optmask = 0;
+
   /* for test, use echo server - TCP port TEST_PORT on loopback */
   testsrv.S_un.S_un_b.s_b1 = 127;
   testsrv.S_un.S_un_b.s_b2 = 0;
@@ -79,7 +81,7 @@ static void prep_tcploopback()
   optmask = ARES_OPT_SERVERS | ARES_OPT_TCP_PORT | ARES_OPT_FLAGS;
   options.servers = &testsrv;
   options.nservers = 1;
-  options.tcp_port = htons(TEST_PORT);
+  options.tcp_port = htons(TEST_PORT_2);
   options.flags = ARES_FLAG_USEVC;
 
   rc = uv_ares_init_options(&uv_data, &channel, &options, optmask);
@@ -100,24 +102,27 @@ BENCHMARK_IMPL(gethostbyname) {
   }
 
   uv_init();
-
-  prep_tcploopback();
+  ares_callbacks = 0;
+  ares_errors = 0;
 
   uv_update_time();
   start_time = uv_now();
 
-  ares_callbacks = 0;
-
   for (ares_start = 0; ares_start < NUM_CALLS_TO_START; ares_start++) {
+    prep_tcploopback();
+
     call_ares();
+
+    uv_run();
+
+    uv_ares_destroy(uv_data, channel);
   }
-
-  uv_run();
-
-  uv_ares_destroy(uv_data, channel);
 
   end_time = uv_now();
 
+  if (ares_errors > 0) {
+    printf("There were %d failures\n", ares_errors);
+  }
   LOGF("ares_gethostbyname: %d calls in %ld ms \n", ares_callbacks, (end_time - start_time));
 
   return 0;

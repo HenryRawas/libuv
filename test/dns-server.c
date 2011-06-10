@@ -41,25 +41,11 @@ static void on_close(uv_handle_t* peer);
 static void on_server_close(uv_handle_t* handle);
 static void on_connection(uv_tcp_t*, int status);
 
-/*
-static struct DNSReq {
-  short len;
-  short queryid;
-};
-static struct DNSRsp {
-  short len;
-  short queryid;
-  short flags;
-  short qcount;
-  short acount;
-  short namesrvcount;
-  short addcount;
-}; */
 
 #define QUERYID_OFFSET 2
 unsigned char DNSRsp[14] = {0, 43, 0, 0, 0x81, 0x80, 0, 1, 0, 1, 0, 0, 0, 0 };
 unsigned char qrecord[15] = {5, 'e', 'c', 'h', 'o', 's', 3, 's', 'r', 'v', 0, 0, 1, 0, 1};
-unsigned char arecord[16] = {0xc0, 0x0c, 0, 0, 0, 1, 0, 0, 5, 0xbd, 0, 4, 10, 0, 1, 1 };
+unsigned char arecord[16] = {0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 5, 0xbd, 0, 4, 10, 0, 1, 1 };
 
 
 static void after_write(uv_req_t* req, int status) {
@@ -93,8 +79,6 @@ static void after_read(uv_tcp_t* handle, ssize_t nread, uv_buf_t buf) {
   uv_req_t* req;
 
   if (nread < 0) {
-    /* Error or EOF */
-    ASSERT (uv_last_error().code == UV_EOF);
 
     if (buf.base) {
       free(buf.base);
@@ -122,9 +106,9 @@ static void after_read(uv_tcp_t* handle, ssize_t nread, uv_buf_t buf) {
   /* prepare DNS response */
   wr->buf.base = (char *)malloc(sizeof(DNSRsp) + sizeof(qrecord) + sizeof(arecord));
   rsp = (unsigned char *)wr->buf.base;
-  memcpy(DNSRsp, rsp, sizeof(DNSRsp));
-  memcpy(qrecord, rsp + sizeof(DNSRsp), sizeof(qrecord));
-  memcpy(arecord, rsp + sizeof(DNSRsp) + sizeof(qrecord), sizeof(arecord));
+  memcpy(rsp, DNSRsp, sizeof(DNSRsp));
+  memcpy(rsp + sizeof(DNSRsp), qrecord, sizeof(qrecord));
+  memcpy(rsp + sizeof(DNSRsp) + sizeof(qrecord), arecord, sizeof(arecord));
 
   rsp[QUERYID_OFFSET] = dnsreq[QUERYID_OFFSET];
   rsp[QUERYID_OFFSET+1] = dnsreq[QUERYID_OFFSET+1];

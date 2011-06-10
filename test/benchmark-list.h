@@ -41,5 +41,6 @@ TASK_LIST_START
   BENCHMARK_HELPER (pump1_client, pump_server)
 
   BENCHMARK_ENTRY  (gethostbyname)
-  BENCHMARK_HELPER (gethostbyname, echo_server)
+  BENCHMARK_HELPER (gethostbyname, dns_server)
+
 TASK_LIST_END
