@@ -34,11 +34,7 @@
 /* if using VS compiler */
 #ifndef _SSIZE_T_
 #define _SSIZE_T_
-typedef long _ssize_t;
-
-#ifndef	_NO_OLDNAMES
-typedef _ssize_t ssize_t;
-#endif
+typedef intptr_t ssize_t;
 #endif /* Not _SSIZE_T_ */ 
 
 

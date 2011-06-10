@@ -34,15 +34,18 @@ struct in_addr testsrv;
 
 void* uv_data;
 
+static void call_ares();
+
 int ares_callbacks;
 int argument;
 
-#define NUM_CALLS_TO_START    10
-#define NUM_CALLS_TOTAL       100
+#define NUM_CALLS_TO_START    100
+#define NUM_CALLS_TOTAL       1
 
 static int64_t start_time;
 static int64_t end_time;
 
+/* callback method. may issue another call */
 static void aresbynamecallback( void *arg,
                           int status,
                           int timeouts,
@@ -54,9 +57,10 @@ static void aresbynamecallback( void *arg,
     }
 }
 
+/* actual call to ares */
 static void call_ares() {
     ares_gethostbyname(channel, 
-                      "echoserver",
+                      "echos.srv",
                       AF_INET,
                       &aresbynamecallback,
                       &argument);
@@ -87,10 +91,8 @@ static void prep_tcploopback()
 BENCHMARK_IMPL(gethostbyname) {
 
   int rc = 0;
-  char addr[4];
   int ares_start;;
 
-  start_time = uv_now();
   rc = ares_library_init(ARES_LIB_INIT_ALL);
   if (rc != 0) {
     printf("ares library init fails %d\n", rc);
@@ -100,6 +102,9 @@ BENCHMARK_IMPL(gethostbyname) {
   uv_init();
 
   prep_tcploopback();
+
+  uv_update_time();
+  start_time = uv_now();
 
   ares_callbacks = 0;
 
@@ -113,7 +118,7 @@ BENCHMARK_IMPL(gethostbyname) {
 
   end_time = uv_now();
 
-  LOGF("ares_gethostbyname: %d calls in %d ms \n", ares_callbacks, (end_time - start_time));
+  LOGF("ares_gethostbyname: %d calls in %ld ms \n", ares_callbacks, (end_time - start_time));
 
   return 0;
 }
