@@ -34,34 +34,56 @@ struct in_addr testsrv;
 
 void* uv_data;
 
-int ares_callbacks;
-int argument;
+int ares_bynamecallbacks;
+int bynamecallbacksig;
+int ares_byaddrcallbacks;
+int byaddrcallbacksig;
 
-#define NUM_CALLS_TO_START    10
-#define NUM_CALLS_TOTAL       100
-
-static int64_t start_time;
-static int64_t end_time;
+static uv_buf_t alloc_cb(uv_handle_t* handle, size_t size) {
+  uv_buf_t buf;
+  buf.base = (char*)malloc(size);
+  buf.len = size;
+  return buf;
+}
 
 static void aresbynamecallback( void *arg,
                           int status,
                           int timeouts,
                           struct hostent *hostent) {
-    ares_callbacks++;
+    int * iargs;
+    ASSERT(arg != NULL);
+    iargs = (int*)arg;
+    ASSERT(*iargs == bynamecallbacksig);
+    ASSERT(timeouts == 0);
 
-    if (ares_callbacks < NUM_CALLS_TOTAL) {
-      call_ares();
-    }
+    ares_bynamecallbacks++;
 }
 
-static void call_ares() {
-    ares_gethostbyname(channel, 
-                      "echoserver",
-                      AF_INET,
-                      &aresbynamecallback,
-                      &argument);
+static void arestimeoutcallback( void *arg,
+                          int status,
+                          int timeouts,
+                          struct hostent *hostent) {
+    int * iargs;
+    ASSERT(arg != NULL);
+    iargs = (int*)arg;
+    ASSERT(*iargs == bynamecallbacksig);
+    ASSERT(timeouts > 0);
+
+    ares_bynamecallbacks++;
 }
 
+static void aresbyaddrcallback( void *arg,
+                          int status,
+                          int timeouts,
+                          struct hostent *hostent) {
+    int * iargs;
+    ASSERT(arg != NULL);
+    iargs = (int*)arg;
+    ASSERT(*iargs == byaddrcallbacksig);
+    ASSERT(timeouts == 0);
+
+    ares_byaddrcallbacks++;
+}
 
 static void prep_tcploopback()
 {
@@ -83,37 +105,164 @@ static void prep_tcploopback()
   ASSERT(rc == ARES_SUCCESS);
 }
 
+static void prep_noecholoopback()
+{
+  int rc = 0;
+  /* for test, use echo server - TCP port TEST_PORT on loopback */
+  testsrv.S_un.S_un_b.s_b1 = 127;
+  testsrv.S_un.S_un_b.s_b2 = 0;
+  testsrv.S_un.S_un_b.s_b3 = 0;
+  testsrv.S_un.S_un_b.s_b4 = 1;
 
-BENCHMARK_IMPL(gethostbyname) {
+  optmask = ARES_OPT_SERVERS | ARES_OPT_TCP_PORT | ARES_OPT_FLAGS;
+  options.servers = &testsrv;
+  options.nservers = 1;
+  options.tcp_port = htons(TEST_PORT_2);
+  options.flags = ARES_FLAG_USEVC;
+
+  rc = uv_ares_init_options(&uv_data, &channel, &options, optmask);
+
+  ASSERT(rc == ARES_SUCCESS);
+}
+
+
+
+TEST_IMPL(gethostbyname) {
 
   int rc = 0;
   char addr[4];
-  int ares_start;;
 
-  start_time = uv_now();
   rc = ares_library_init(ARES_LIB_INIT_ALL);
   if (rc != 0) {
     printf("ares library init fails %d\n", rc);
     return 1;
   }
 
-  uv_init();
+  uv_init(alloc_cb);
 
+  printf("Start basic gethostbyname test\n");
   prep_tcploopback();
 
-  ares_callbacks = 0;
+  ares_bynamecallbacks = 0;
+  bynamecallbacksig = 7;
 
-  for (ares_start = 0; ares_start < NUM_CALLS_TO_START; ares_start++) {
-    call_ares();
-  }
+  ares_gethostbyname(channel, 
+                    "microsoft.com",
+                    AF_INET,
+                    &aresbynamecallback,
+                    &bynamecallbacksig);
+  uv_run();
+
+  ASSERT(ares_bynamecallbacks == 1);
+
+  uv_ares_destroy(uv_data, channel);
+  printf("Done basic gethostbyname test\n");
+
+
+  /* two sequential call on new channel */
+
+  printf("Start gethostbyname and gethostbyaddr sequential test\n");
+  prep_tcploopback();
+
+  ares_bynamecallbacks = 0;
+  bynamecallbacksig = 7;
+
+  ares_gethostbyname(channel, 
+                    "microsoft.com",
+                    AF_INET,
+                    &aresbynamecallback,
+                    &bynamecallbacksig);
+  uv_run();
+
+  ASSERT(ares_bynamecallbacks == 1);
+
+
+  ares_byaddrcallbacks = 0;
+  byaddrcallbacksig = 8;
+  addr[0] = 10;
+  addr[1] = 0;
+  addr[2] = 1;
+  addr[3] = 99;
+
+  ares_gethostbyaddr(channel, 
+                    addr,
+                    4,
+                    AF_INET,
+                    &aresbyaddrcallback,
+                    &byaddrcallbacksig);
 
   uv_run();
 
+  ASSERT(ares_byaddrcallbacks == 1);
+  
   uv_ares_destroy(uv_data, channel);
+  printf("Done gethostbyname and gethostbyaddr sequential test\n");
 
-  end_time = uv_now();
 
-  LOGF("ares_gethostbyname: %d calls in %d ms \n", ares_callbacks, (end_time - start_time));
+
+
+  /* two simultaneous calls on new channel */
+
+  printf("Start gethostbyname and gethostbyaddr concurrent test\n");
+  prep_tcploopback();
+
+  ares_bynamecallbacks = 0;
+  bynamecallbacksig = 7;
+
+  ares_gethostbyname(channel, 
+                    "microsoft.com",
+                    AF_INET,
+                    &aresbynamecallback,
+                    &bynamecallbacksig);
+
+  ares_byaddrcallbacks = 0;
+  byaddrcallbacksig = 8;
+  addr[0] = 10;
+  addr[1] = 0;
+  addr[2] = 1;
+  addr[3] = 99;
+
+  ares_gethostbyaddr(channel, 
+                    addr,
+                    4,
+                    AF_INET,
+                    &aresbyaddrcallback,
+                    &byaddrcallbacksig);
+
+  uv_run();
+
+  ASSERT(ares_bynamecallbacks == 1);
+  ASSERT(ares_byaddrcallbacks == 1);
+
+
+  uv_ares_destroy(uv_data, channel);
+  printf("Done gethostbyname and gethostbyaddr concurrent test\n");
+
+
+  /* test for timeout using noecho-server */
+  
+  // test runner has limit of 5 seconds, so we cannot include this test.
+
+  //printf("Start gethostbyname timeout test\n");
+  //prep_noecholoopback();
+
+  //ares_bynamecallbacks = 0;
+  //bynamecallbacksig = 7;
+
+  //ares_gethostbyname(channel, 
+  //                  "microsoft.com",
+  //                  AF_INET,
+  //                  &arestimeoutcallback,
+  //                  &bynamecallbacksig);
+  //uv_run();
+  //printf("Uv run completes\n");
+
+  //ASSERT(ares_bynamecallbacks == 1);
+
+  //uv_ares_destroy(uv_data, channel);
+  //printf("Done gethostbyname timeout test\n");
+
+
 
   return 0;
 }
