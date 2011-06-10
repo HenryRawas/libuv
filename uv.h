@@ -363,13 +363,11 @@ struct uv_ares_action_s {
 };
 
 /* c-ares integration initialize and terminate */
-int uv_ares_init_options(void **uv_data_ptr,
-                        ares_channel *channelptr,
+int uv_ares_init_options(ares_channel *channelptr,
                         struct ares_options *options,
                         int optmask);
 
-void uv_ares_destroy(void* uv_data,
-                    ares_channel channel);
+void uv_ares_destroy(ares_channel channel);
 
 
 /*

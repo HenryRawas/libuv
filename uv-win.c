@@ -216,6 +216,9 @@ struct uv_ares_channel_s {
 
 typedef struct uv_ares_channel_s uv_ares_channel_t;
 
+/* static data to hold single ares_channel */
+static uv_ares_channel_t uv_ares_data = { NULL };
+
 /* default timeout per socket request if ares does not specify value */
 /* use 20 sec */
 #define ARES_TIMEOUT_MS            20000
@@ -2020,20 +2023,19 @@ void uv_ares_task_cleanup(uv_ares_action_t* handle, uv_req_t* req) {
 }
 
 /* set ares SOCK_STATE callback to our handler */
-int uv_ares_init_options(void **uv_data_ptr,
-                  ares_channel *channelptr,
-                  struct ares_options *options,
-                  int optmask) {
+int uv_ares_init_options(ares_channel *channelptr,
+                        struct ares_options *options,
+                        int optmask) {
   int rc;
-  /* allocate ares_channel_data */
-  uv_ares_channel_t *data = (uv_ares_channel_t*)malloc(sizeof(uv_ares_channel_t));
-  if (data == NULL) {
-    return ARES_ENOMEM;
+
+  /* only allow single init at a time */
+  if (uv_ares_data.channel != NULL) {
+    return UV_EALREADY;
   }
 
   /* set our callback as an option */
   options->sock_state_cb = uv_ares_sockstate_cb;
-  options->sock_state_cb_data = data;
+  options->sock_state_cb_data = &uv_ares_data;
   optmask |= ARES_OPT_SOCK_STATE_CB;
 
   /* We do the call to ares_init_option for caller. */
@@ -2041,21 +2043,18 @@ int uv_ares_init_options(void **uv_data_ptr,
 
   /* if success, save channel */
   if (rc == ARES_SUCCESS) {
-    *uv_data_ptr = data;
-    data->channel = *channelptr;
-  } else {
-    *uv_data_ptr = NULL;
-    free(data);
+    uv_ares_data.channel = *channelptr;
   }
 
   return rc;
 }
 
 /* release memory */
-void uv_ares_destroy(void *uv_data, ares_channel channel) {
-  ares_destroy(channel);
-  if (uv_data != NULL) {
-    free(uv_data);
+void uv_ares_destroy(ares_channel channel) {
+  /* only allow destroy if did init */
+  if (uv_ares_data.channel != NULL) {
+    ares_destroy(channel);
+    uv_ares_data.channel = NULL;
   }
 }
 

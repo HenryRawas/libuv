@@ -32,15 +32,13 @@ int optmask;
 
 struct in_addr testsrv;
 
-void* uv_data;
-
 static void call_ares();
 
 int ares_callbacks;
 int ares_errors;
 int argument;
 
-#define NUM_CALLS_TO_START    100
+#define NUM_CALLS_TO_START    1000
 
 static int64_t start_time;
 static int64_t end_time;
@@ -84,7 +82,7 @@ static void prep_tcploopback()
   options.tcp_port = htons(TEST_PORT_2);
   options.flags = ARES_FLAG_USEVC;
 
-  rc = uv_ares_init_options(&uv_data, &channel, &options, optmask);
+  rc = uv_ares_init_options(&channel, &options, optmask);
 
   ASSERT(rc == ARES_SUCCESS);
 }
@@ -115,7 +113,7 @@ BENCHMARK_IMPL(gethostbyname) {
 
     uv_run();
 
-    uv_ares_destroy(uv_data, channel);
+    uv_ares_destroy(channel);
   }
 
   end_time = uv_now();

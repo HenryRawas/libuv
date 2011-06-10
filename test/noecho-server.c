@@ -67,7 +67,6 @@ static void after_shutdown(uv_req_t* req, int status) {
 
 static void after_read(uv_tcp_t* handle, ssize_t nread, uv_buf_t buf) {
   int i;
-  write_req_t *wr;
   uv_req_t* req;
 
   if (nread < 0) {
