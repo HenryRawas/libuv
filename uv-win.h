@@ -110,8 +110,6 @@ typedef struct uv_buf_t {
   uv_ares_task_t* ares_next;              \
   struct uv_req_s ares_req;               \
   SOCKET sock;                            \
-  int read;                               \
-  int write;                              \
   HANDLE h_wait;                          \
   WSAEVENT h_event;                       \
   HANDLE h_close_event;

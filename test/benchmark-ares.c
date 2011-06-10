@@ -32,8 +32,6 @@ int optmask;
 
 struct in_addr testsrv;
 
-static void call_ares();
-
 int ares_callbacks;
 int ares_errors;
 int argument;
@@ -53,15 +51,6 @@ static void aresbynamecallback( void *arg,
       ares_errors++;
     }
 
-}
-
-/* actual call to ares */
-static void call_ares() {
-    ares_gethostbyname(channel, 
-                      "echos.srv",
-                      AF_INET,
-                      &aresbynamecallback,
-                      &argument);
 }
 
 
@@ -109,7 +98,11 @@ BENCHMARK_IMPL(gethostbyname) {
   for (ares_start = 0; ares_start < NUM_CALLS_TO_START; ares_start++) {
     prep_tcploopback();
 
-    call_ares();
+    ares_gethostbyname(channel, 
+                      "echos.srv",
+                      AF_INET,
+                      &aresbynamecallback,
+                      &argument);
 
     uv_run();
 

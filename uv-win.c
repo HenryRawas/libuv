@@ -203,7 +203,7 @@ static char uv_zero_[] = "";
 /* ares socket callback */
 void SockStateCb(void *data, ares_socket_t sock, int read, int write);
 void uv_ares_process(uv_ares_action_t* handle, uv_req_t* req);
-void uv_ares_task_cleanup(uv_ares_action_t* handle, uv_req_t* req);
+void uv_ares_task_cleanup(uv_ares_task_t* handle, uv_req_t* req);
 
 /* list used for ares task handles */
 static uv_ares_task_t* uv_ares_handles_ = NULL;
@@ -1606,7 +1606,7 @@ static void uv_process_reqs() {
         break;
 
       case UV_ARES_TASK:
-        uv_ares_task_cleanup((uv_ares_action_t*)handle, req);
+        uv_ares_task_cleanup((uv_ares_task_t*)handle, req);
         break;
 
       default:
@@ -1939,8 +1939,6 @@ void uv_ares_sockstate_cb(void *data, ares_socket_t sock, int read, int write) {
       uv_handle_ares->close_cb = NULL;
       uv_handle_ares->data = ((uv_ares_channel_t*)data)->channel;
       uv_handle_ares->sock = sock;
-      uv_handle_ares->read = read;
-      uv_handle_ares->write = write;
       uv_handle_ares->h_wait = NULL;
       uv_handle_ares->flags = 0;
 
@@ -1997,9 +1995,9 @@ void uv_ares_process(uv_ares_action_t* handle, uv_req_t* req) {
 }
 
 /* called via uv_poll when ares is finished with socket */
-void uv_ares_task_cleanup(uv_ares_action_t* handle, uv_req_t* req) {
+void uv_ares_task_cleanup(uv_ares_task_t* handle, uv_req_t* req) {
 
-  uv_ares_task_t* uv_handle_ares = (uv_ares_task_t*)handle;
+  uv_ares_task_t* uv_handle_ares = handle;
 
   /* check for event complete without waiting */
   unsigned int signaled = WaitForSingleObject(uv_handle_ares->h_close_event, 0);
