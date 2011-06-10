@@ -345,7 +345,6 @@ void uv_timer_set_repeat(uv_timer_t* timer, int64_t repeat);
 int64_t uv_timer_get_repeat(uv_timer_t* timer);
 
 
-
 /*
  * Subclass of uv_handle_t. Used for integration of c-ares.
  */
@@ -353,6 +352,7 @@ struct uv_ares_task_s {
   UV_HANDLE_FIELDS
   UV_ARES_TASK_PRIVATE_FIELDS
 };
+
 
 /*
  * Subclass of uv_handle_t. Used for integration of c-ares.

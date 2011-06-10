@@ -112,7 +112,6 @@ typedef struct uv_buf_t {
   SOCKET sock;                            \
   int read;                               \
   int write;                              \
-  long volatile pending;                  \
   HANDLE h_wait;                          \
   WSAEVENT h_event;                       \
   HANDLE h_close_event;
