@@ -117,6 +117,8 @@ static void after_read(uv_tcp_t* handle, ssize_t nread, uv_buf_t buf) {
   rsp[QUERYID_OFFSET] = dnsreq[QUERYID_OFFSET];
   rsp[QUERYID_OFFSET+1] = dnsreq[QUERYID_OFFSET+1];
 
+  free(buf.base);
+
   wr->buf.len = rsplen;
   if (uv_write(&wr->req, &wr->buf, 1)) {
     FATAL("uv_write failed");
