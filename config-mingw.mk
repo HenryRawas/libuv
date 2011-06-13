@@ -41,5 +41,8 @@ uv-win.o: uv-win.c uv.h uv-win.h
 uv-common.o: uv-common.c uv.h uv-win.h
 	$(CC) $(CFLAGS) -c uv-common.c -o uv-common.o
 
+c-ares/libcares.a: c-ares/*.c
+	cd c-ares &&  make -f Makefile.m32 && cd ..
+
 distclean-platform:
 clean-platform:

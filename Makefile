@@ -26,10 +26,10 @@ else
 include config-unix.mk
 endif
 
-TESTS=test/echo-server.c test/noecho-server.c test/test-*.c
+TESTS=test/echo-server.c  test/test-*.c
 BENCHMARKS=test/echo-server.c test/benchmark-*.c test/dns-server.c
 
-all: uv.a test/run-tests test/run-benchmarks
+all: uv.a c-ares/libcares.a test/run-tests test/run-benchmarks
 
 test/run-tests$(E): test/*.h test/run-tests.c $(RUNNER_SRC) test/runner-unix.c $(TESTS) uv.a c-ares/libcares.a
 	$(CC) $(RUNNER_CFLAGS) $(RUNNER_LINKFLAGS) -o test/run-tests test/run-tests.c \
@@ -53,7 +53,7 @@ bench: test/run-benchmarks$(E)
 	test/run-benchmarks
 
 clean: clean-platform
-	$(RM) -f *.o *.a test/run-tests$(E) test/run-benchmarks$(E)
+	$(RM) -f *.o *.a c-ares/*.a test/run-tests$(E) test/run-benchmarks$(E)
 
 distclean: distclean-platform
-	$(RM) -f *.o *.a test/run-tests$(E) test/run-benchmarks$(E)
+	$(RM) -f *.o *.a c-ares/*.a test/run-tests$(E) test/run-benchmarks$(E)

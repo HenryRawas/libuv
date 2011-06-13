@@ -200,8 +200,6 @@ static char uv_zero_[] = "";
 
 
 /* ares integration */
-/* ares socket callback */
-void SockStateCb(void *data, ares_socket_t sock, int read, int write);
 void uv_ares_process(uv_ares_action_t* handle, uv_req_t* req);
 void uv_ares_task_cleanup(uv_ares_task_t* handle, uv_req_t* req);
 
@@ -1996,19 +1994,16 @@ void uv_ares_process(uv_ares_action_t* handle, uv_req_t* req) {
 
 /* called via uv_poll when ares is finished with socket */
 void uv_ares_task_cleanup(uv_ares_task_t* handle, uv_req_t* req) {
-
-  uv_ares_task_t* uv_handle_ares = handle;
-
-  /* check for event complete without waiting */
-  unsigned int signaled = WaitForSingleObject(uv_handle_ares->h_close_event, 0);
+    /* check for event complete without waiting */
+  unsigned int signaled = WaitForSingleObject(handle->h_close_event, 0);
 
   if (signaled != WAIT_TIMEOUT) {
 
     uv_refs_--;
 
     /* close event handle and free uv handle memory */
-    CloseHandle(uv_handle_ares->h_close_event);
-    free(uv_handle_ares);
+    CloseHandle(handle->h_close_event);
+    free(handle);
   } else {
     /* stil busy - repost and try again */
     if (!PostQueuedCompletionStatus(uv_iocp_,

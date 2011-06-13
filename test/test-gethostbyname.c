@@ -57,19 +57,6 @@ static void aresbynamecallback( void *arg,
     ares_bynamecallbacks++;
 }
 
-static void arestimeoutcallback( void *arg,
-                          int status,
-                          int timeouts,
-                          struct hostent *hostent) {
-    int * iargs;
-    ASSERT(arg != NULL);
-    iargs = (int*)arg;
-    ASSERT(*iargs == bynamecallbacksig);
-    ASSERT(timeouts > 0);
-
-    ares_bynamecallbacks++;
-}
-
 static void aresbyaddrcallback( void *arg,
                           int status,
                           int timeouts,
@@ -102,27 +89,6 @@ static void prep_tcploopback()
 
   ASSERT(rc == ARES_SUCCESS);
 }
-
-static void prep_noecholoopback()
-{
-  int rc = 0;
-  /* for test, use echo server - TCP port TEST_PORT on loopback */
-  testsrv.S_un.S_un_b.s_b1 = 127;
-  testsrv.S_un.S_un_b.s_b2 = 0;
-  testsrv.S_un.S_un_b.s_b3 = 0;
-  testsrv.S_un.S_un_b.s_b4 = 1;
-
-  optmask = ARES_OPT_SERVERS | ARES_OPT_TCP_PORT | ARES_OPT_FLAGS;
-  options.servers = &testsrv;
-  options.nservers = 1;
-  options.tcp_port = htons(TEST_PORT_2);
-  options.flags = ARES_FLAG_USEVC;
-
-  rc = uv_ares_init_options(&channel, &options, optmask);
-
-  ASSERT(rc == ARES_SUCCESS);
-}
-
 
 
 TEST_IMPL(gethostbyname) {
@@ -196,8 +162,6 @@ TEST_IMPL(gethostbyname) {
   printf("Done gethostbyname and gethostbyaddr sequential test\n");
 
 
-
-
   /* two simultaneous calls on new channel */
 
   printf("Start gethostbyname and gethostbyaddr concurrent test\n");
@@ -234,32 +198,6 @@ TEST_IMPL(gethostbyname) {
 
   uv_ares_destroy(channel);
   printf("Done gethostbyname and gethostbyaddr concurrent test\n");
-
-
-  /* test for timeout using noecho-server */
-  
-  // test runner has limit of 5 seconds, so we cannot include this test.
-
-  //printf("Start gethostbyname timeout test\n");
-  //prep_noecholoopback();
-
-  //ares_bynamecallbacks = 0;
-  //bynamecallbacksig = 7;
-
-  //ares_gethostbyname(channel, 
-  //                  "microsoft.com",
-  //                  AF_INET,
-  //                  &arestimeoutcallback,
-  //                  &bynamecallbacksig);
-  //uv_run();
-  //printf("Uv run completes\n");
-
-  //ASSERT(ares_bynamecallbacks == 1);
-
-  //uv_ares_destroy(channel);
-  //printf("Done gethostbyname timeout test\n");
-
-
 
   return 0;
 }
