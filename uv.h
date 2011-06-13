@@ -33,7 +33,7 @@ extern "C" {
 
 #include <ares.h>
 
-#ifndef ssize_t
+#ifdef _MSC_VER
 typedef intptr_t ssize_t;
 #endif
 

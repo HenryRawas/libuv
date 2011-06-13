@@ -31,12 +31,6 @@
 
 #include "tree.h"
 
-/* if using VS compiler */
-#ifndef _SSIZE_T_
-#define _SSIZE_T_
-typedef intptr_t ssize_t;
-#endif /* Not _SSIZE_T_ */ 
-
 
 /**
  * It should be possible to cast uv_buf_t[] to WSABUF[]
