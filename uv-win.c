@@ -506,7 +506,6 @@ static int uv_tcp_set_socket(uv_tcp_t* handle, SOCKET socket) {
   }
 
   handle->socket = socket;
-  uv_refs_++;
 
   return 0;
 }
