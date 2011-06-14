@@ -1852,6 +1852,9 @@ VOID CALLBACK uv_ares_socksignal_tp(PVOID parameter,
 
     /* clear socket status for this event */
     /* do not fail if error, thread may run after socket close */
+    /* The code assumes that c-ares will write all pending data in the callback,
+       unless the socket would block. We can clear the state here to avoid unecessary
+       signals. */
     WSAEnumNetworkEvents(sockhandle->sock, sockhandle->h_event, &network_events);
 
     /* setup new handle */
@@ -1891,6 +1894,8 @@ void uv_ares_sockstate_cb(void *data, ares_socket_t sock, int read, int write) {
 
   if (read == 0 && write == 0) {
     /* if read and write are 0, cleanup existing data */
+    /* The code assumes that c-ares does a callback with read = 0 and write = 0
+       when the socket is closed. After we recieve this we stop monitoring the socket. */
     if (uv_handle_ares != NULL) {
       uv_req_t* uv_ares_req;
 
@@ -1929,6 +1934,9 @@ void uv_ares_sockstate_cb(void *data, ares_socket_t sock, int read, int write) {
   } else {
     if (uv_handle_ares == NULL) {
       /* setup new handle */
+      /* The code assumes that c-ares will call us when it has an open socket.
+        We need to call into c-ares when there is something to read,
+        or when it becomes writable. */
       uv_handle_ares = (uv_ares_task_t*)malloc(sizeof(uv_ares_task_t));
       if (uv_handle_ares == NULL) {
         uv_fatal_error(ERROR_OUTOFMEMORY, "malloc");
