@@ -97,4 +97,7 @@ typedef struct {
   uv_loop_cb timer_cb;
 
 
+/* UV_GETADDRINFO */
+#define UV_GETADDRINFO_PRIVATE_FIELDS
+
 #endif /* UV_UNIX_H */

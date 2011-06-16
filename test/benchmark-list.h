@@ -23,6 +23,7 @@ BENCHMARK_DECLARE (sizes)
 BENCHMARK_DECLARE (ping_pongs)
 BENCHMARK_DECLARE (pump100_client)
 BENCHMARK_DECLARE (pump1_client)
+BENCHMARK_DECLARE (getaddrinfo)
 HELPER_DECLARE    (pump_server)
 HELPER_DECLARE    (echo_server)
 
@@ -37,4 +38,6 @@ TASK_LIST_START
 
   BENCHMARK_ENTRY  (pump1_client)
   BENCHMARK_HELPER (pump1_client, pump_server)
+
+  BENCHMARK_ENTRY  (getaddrinfo)
 TASK_LIST_END

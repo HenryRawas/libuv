@@ -93,6 +93,15 @@ typedef struct uv_buf_t {
   /* char to avoid alignment issues */    \
   char volatile async_sent;
 
+#define UV_GETADDRINFO_PRIVATE_FIELDS     \
+  struct uv_req_s getadddrinfo_req;       \
+  uv_getaddrinfo_cb getaddrinfo_cb;       \
+  char* node;                             \
+  char* service;                          \
+  struct addrinfo* hints;                 \
+  struct addrinfo* res;                   \
+  int retcode;
+
 #define UV_PREPARE_PRIVATE_FIELDS /* empty */
 #define UV_CHECK_PRIVATE_FIELDS   /* empty */
 #define UV_IDLE_PRIVATE_FIELDS    /* empty */

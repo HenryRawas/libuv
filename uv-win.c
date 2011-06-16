@@ -200,6 +200,10 @@ static struct sockaddr_in uv_addr_ip4_any_;
 static char uv_zero_[] = "";
 
 
+/* getaddrinfo integration */
+void uv_getaddrinfo_done(uv_getaddrinfo_t* handle, uv_req_t* req);
+
+
 /* Atomic set operation on char */
 #ifdef _MSC_VER /* MSVC */
 
@@ -1576,6 +1580,10 @@ static void uv_process_reqs() {
         uv_async_return_req((uv_async_t*)handle, req);
         break;
 
+      case UV_GETADDRINFO:
+        uv_getaddrinfo_done((uv_getaddrinfo_t*)handle, req);
+        break;
+
       default:
         assert(0);
     }
@@ -1763,4 +1771,76 @@ done:
   }
 
   return retVal;
+}
+
+
+/* getaddrinfo worker thread implementation */
+DWORD WINAPI getaddrinfo_thread_proc(void* parameter) {
+  uv_getaddrinfo_t* handle = (uv_getaddrinfo_t*)parameter;
+  int ret;
+  struct uv_req_s* uv_req;
+
+  assert(handle != NULL);
+
+  if (handle != NULL) {
+    /* call OS function on this thread */
+    ret = getaddrinfo(handle->node, handle->service, handle->hints, &handle->res);
+    handle->retcode = ret;
+
+    /* init request for Post handling */
+    uv_req = &handle->getadddrinfo_req;
+    uv_req_init(uv_req, (uv_handle_t*)handle, NULL);
+    uv_req->type = UV_WAKEUP;
+
+    /* post getaddrinfo completed */
+    if (!PostQueuedCompletionStatus(uv_iocp_,
+                                  0,
+                                  0,
+                                  &uv_req->overlapped)) {
+      uv_fatal_error(GetLastError(), "PostQueuedCompletionStatus");
+    }
+  }
+
+  return 0;
+}
+
+/* Called from uv_run when complete. Call user specified callback
+ * then free returned addrinfo
+ */
+void uv_getaddrinfo_done(uv_getaddrinfo_t* handle, uv_req_t* req) {
+  uv_err_code uv_ret = uv_translate_sys_error(handle->retcode);
+
+  handle->getaddrinfo_cb(handle, uv_ret, handle->res);
+  if (handle->retcode == 0) {
+    freeaddrinfo(handle->res);
+  }
+
+  uv_refs_--;
+}
+
+/* entry point for getaddrinfo */
+void uv_getaddrinfo(uv_getaddrinfo_t* handle,
+                   uv_getaddrinfo_cb getaddrinfo_cb,
+                   char* node,
+                   char* service,
+                   struct addrinfo* hints) {
+  int ret;
+
+  /* we do not copy the data, only pointers.
+  * Caller memory must remain valid until callback 
+  */
+  handle->getaddrinfo_cb = getaddrinfo_cb;
+  handle->node = node;
+  handle->service = service;
+  handle->hints = hints;
+  handle->res = NULL;
+  handle->type = UV_GETADDRINFO;
+
+  /* Ask thread to run. Treat this as a long operation */
+  ret = QueueUserWorkItem(&getaddrinfo_thread_proc, handle, WT_EXECUTELONGFUNCTION);
+  if (ret == 0) {
+    uv_fatal_error(GetLastError(), "QueueUserWorkItem");
+  }
+
+  uv_refs_++;
 }

@@ -47,6 +47,7 @@ typedef struct uv_prepare_s uv_prepare_t;
 typedef struct uv_check_s uv_check_t;
 typedef struct uv_idle_s uv_idle_t;
 typedef struct uv_req_s uv_req_t;
+typedef struct uv_getaddrinfo_s uv_getaddrinfo_t;
 
 
 #if defined(__unix__) || defined(__POSIX__) || defined(__APPLE__)
@@ -74,6 +75,7 @@ typedef void (*uv_close_cb)(uv_handle_t* handle);
 /* TODO: do loop_cb and async_cb really need a status argument? */
 typedef void (*uv_loop_cb)(uv_handle_t* handle, int status);
 typedef void (*uv_async_cb)(uv_handle_t* handle, int status);
+typedef void (*uv_getaddrinfo_cb)(uv_getaddrinfo_t* handle, int status, struct addrinfo* res);
 
 
 /* Expand this list if necessary. */
@@ -125,7 +127,8 @@ typedef enum {
   UV_PREPARE,
   UV_CHECK,
   UV_IDLE,
-  UV_ASYNC
+  UV_ASYNC,
+  UV_GETADDRINFO
 } uv_handle_type;
 
 typedef enum {
@@ -344,6 +347,26 @@ int64_t uv_timer_get_repeat(uv_timer_t* timer);
 
 
 /*
+ * Subclass of uv_handle_t. Used for integration of getaddrinfo.
+ */
+struct uv_getaddrinfo_s {
+  UV_HANDLE_FIELDS
+  UV_GETADDRINFO_PRIVATE_FIELDS
+};
+
+
+/* uv_getaddrinfo 
+ * return code is passed to the callback getaddrinfo_cb.
+ * Callback must not call freeaddrinfo
+ */
+void uv_getaddrinfo(uv_getaddrinfo_t* handle,
+                  uv_getaddrinfo_cb getaddrinfo_cb,
+                  char* node,
+                  char* service,
+                  struct addrinfo* hints);
+
+
+/*
  * Most functions return boolean: 0 for success and -1 for failure.
  * On error the user should then call uv_last_error() to determine
  * the error code.
@@ -381,6 +404,7 @@ union uv_any_handle {
   uv_idle_t idle;
   uv_async_t async;
   uv_timer_t timer;
+  uv_getaddrinfo_t getaddrinfo;
 };
 
 /* Diagnostic counters */
