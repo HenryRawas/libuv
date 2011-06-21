@@ -125,94 +125,94 @@ static void process_req(uv_tcp_t* handle, ssize_t nread, uv_buf_t buf) {
   char* hdrstart;
   int usingprev = 0;
 
-    wr = (write_req_t*) malloc(sizeof *wr);
-    uv_req_init(&wr->req, (uv_handle_t*)handle, after_write);
-    wr->buf.base = (char*)malloc(WRITE_BUF_LEN);
-    wr->buf.len = 0;
+  wr = (write_req_t*) malloc(sizeof *wr);
+  uv_req_init(&wr->req, (uv_handle_t*)handle, after_write);
+  wr->buf.base = (char*)malloc(WRITE_BUF_LEN);
+  wr->buf.len = 0;
 
-    if (dns->state.prevbuf_ptr != NULL) {
-      dnsreq = dns->state.prevbuf_ptr + dns->state.prevbuf_pos;
-      readbuf_remaining = dns->state.prevbuf_rem;
-      usingprev = 1;
-    } else {
+  if (dns->state.prevbuf_ptr != NULL) {
+    dnsreq = dns->state.prevbuf_ptr + dns->state.prevbuf_pos;
+    readbuf_remaining = dns->state.prevbuf_rem;
+    usingprev = 1;
+  } else {
+    dnsreq = buf.base;
+    readbuf_remaining = nread;
+  }
+  hdrstart = dnsreq;
+
+  while (dnsreq != NULL) {
+    /* something to process */
+    while (readbuf_remaining > 0) {
+      /* something to process in current buffer */
+      if (hdrbuf_remaining > 0) {
+        /* process len and id */
+        if (readbuf_remaining < hdrbuf_remaining) {
+          /* too little to get request header. save for next buffer */
+          memcpy(&hdrbuf[DNSREC_LEN - hdrbuf_remaining], dnsreq, readbuf_remaining);
+          hdrbuf_remaining = DNSREC_LEN - readbuf_remaining;
+          break;
+        } else {
+          short int reclen_n;
+          /* save header */
+          memcpy(&hdrbuf[DNSREC_LEN - hdrbuf_remaining], dnsreq, hdrbuf_remaining);
+          dnsreq += hdrbuf_remaining;
+          readbuf_remaining -= hdrbuf_remaining;
+          hdrbuf_remaining = 0;
+
+          /* get record length */
+          reclen_n = *((short int*)hdrbuf);
+          rec_remaining = ntohs(reclen_n) - (DNSREC_LEN - 2);
+        }
+      }
+          
+      if (rec_remaining <= readbuf_remaining) {
+        /* prepare reply */
+        addrsp(wr, hdrbuf);
+
+        /* move to next record */
+        dnsreq += rec_remaining;
+        hdrstart = dnsreq;
+        readbuf_remaining -= rec_remaining;
+        rec_remaining = 0;
+        hdrbuf_remaining = DNSREC_LEN;
+      } else {
+        /* otherwise this buffer is done. */
+        rec_remaining -= readbuf_remaining;
+        break;
+      }
+    }
+
+    /* if we had to use bytes from prev buffer, start processing the current one */
+    if (usingprev == 1) {
+      /* free previous buffer */
+      free(dns->state.prevbuf_ptr);
       dnsreq = buf.base;
       readbuf_remaining = nread;
-    }
-    hdrstart = dnsreq;
-
-    while (dnsreq != NULL) {
-      /* something to process */
-      while (readbuf_remaining > 0) {
-        /* something to process in current buffer */
-        if (hdrbuf_remaining > 0) {
-          /* process len and id */
-          if (readbuf_remaining < hdrbuf_remaining) {
-            /* too little to get request header. save for next buffer */
-            memcpy(&hdrbuf[DNSREC_LEN - hdrbuf_remaining], dnsreq, readbuf_remaining);
-            hdrbuf_remaining = DNSREC_LEN - readbuf_remaining;
-            break;
-          } else {
-            short int reclen_n;
-            /* save header */
-            memcpy(&hdrbuf[DNSREC_LEN - hdrbuf_remaining], dnsreq, hdrbuf_remaining);
-            dnsreq += hdrbuf_remaining;
-            readbuf_remaining -= hdrbuf_remaining;
-            hdrbuf_remaining = 0;
-
-            /* get record length */
-            reclen_n = *((short int*)hdrbuf);
-            rec_remaining = ntohs(reclen_n) - (DNSREC_LEN - 2);
-          }
-        }
-          
-        if (rec_remaining <= readbuf_remaining) {
-          /* prepare reply */
-          addrsp(wr, hdrbuf);
-
-          /* move to next record */
-          dnsreq += rec_remaining;
-          hdrstart = dnsreq;
-          readbuf_remaining -= rec_remaining;
-          rec_remaining = 0;
-          hdrbuf_remaining = DNSREC_LEN;
-        } else {
-          /* otherwise this buffer is done. */
-          rec_remaining -= readbuf_remaining;
-          break;
-        }
-      }
-
-      /* if we had to use bytes from prev buffer, start processing the current one */
-      if (usingprev == 1) {
-        /* free previous buffer */
-        free(dns->state.prevbuf_ptr);
-        dnsreq = buf.base;
-        readbuf_remaining = nread;
-        usingprev = 0;
-      } else {
-        dnsreq = NULL;
-      }
-    }
-
-    /* send write buffer */
-    if (wr->buf.len > 0) {
-      if (uv_write(&wr->req, &wr->buf, 1)) {
-        FATAL("uv_write failed");
-      }
-    }
-
-    if (readbuf_remaining > 0) {
-      /* save start of record position, so we can continue on next read */
-      dns->state.prevbuf_ptr = buf.base;
-      dns->state.prevbuf_pos = hdrstart - buf.base;
-      dns->state.prevbuf_rem = nread - dns->state.prevbuf_pos;
+      usingprev = 0;
     } else {
-      /* nothing left in this buffer */
-      dns->state.prevbuf_ptr = NULL;
-      dns->state.prevbuf_pos = 0;
-      dns->state.prevbuf_rem = 0;
-      free(buf.base);
+      dnsreq = NULL;
     }
+  }
+
+  /* send write buffer */
+  if (wr->buf.len > 0) {
+    if (uv_write(&wr->req, &wr->buf, 1)) {
+      FATAL("uv_write failed");
+    }
+  }
+
+  if (readbuf_remaining > 0) {
+    /* save start of record position, so we can continue on next read */
+    dns->state.prevbuf_ptr = buf.base;
+    dns->state.prevbuf_pos = hdrstart - buf.base;
+    dns->state.prevbuf_rem = nread - dns->state.prevbuf_pos;
+  } else {
+    /* nothing left in this buffer */
+    dns->state.prevbuf_ptr = NULL;
+    dns->state.prevbuf_pos = 0;
+    dns->state.prevbuf_rem = 0;
+    free(buf.base);
+  }
 }
 
 static void after_read(uv_tcp_t* handle, ssize_t nread, uv_buf_t buf) {
