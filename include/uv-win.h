@@ -66,11 +66,7 @@ typedef struct uv_buf_t {
   typedef struct uv_pipe_accept_s {       \
     UV_REQ_FIELDS                         \
     HANDLE pipeHandle;                    \
-<<<<<<< HEAD
-    uv_pip_accept_t* next_pending;        \
-=======
     struct uv_pipe_accept_s* next_pending; \
->>>>>>> c1bddb9677969088f21da8f6bfe3c132adffc9c9
   } uv_pipe_accept_t;
 
 #define uv_stream_connection_fields       \
