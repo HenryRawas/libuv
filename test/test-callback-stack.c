@@ -45,7 +45,7 @@ static int bytes_received = 0;
 static int shutdown_cb_called = 0;
 
 
-static uv_buf_t alloc_cb(uv_stream_t* tcp, size_t size) {
+static uv_buf_t alloc_cb(uv_handle_t* handle, size_t size) {
   uv_buf_t buf;
   buf.len = size;
   buf.base = (char*) malloc(size);
@@ -76,16 +76,14 @@ static void read_cb(uv_stream_t* tcp, ssize_t nread, uv_buf_t buf) {
   free(buf.base);
 
   if (nread == 0) {
-    ASSERT(uv_last_error().code == UV_EAGAIN);
+    ASSERT(uv_last_error(uv_default_loop()).code == UV_EAGAIN);
     return;
 
   } else if (nread == -1) {
-    ASSERT(uv_last_error().code == UV_EOF);
+    ASSERT(uv_last_error(uv_default_loop()).code == UV_EOF);
 
     nested++;
-    if (uv_close((uv_handle_t*)tcp, close_cb)) {
-      FATAL("uv_close failed");
-    }
+    uv_close((uv_handle_t*)tcp, close_cb);
     nested--;
 
     return;
@@ -111,8 +109,6 @@ static void read_cb(uv_stream_t* tcp, ssize_t nread, uv_buf_t buf) {
 
 
 static void timer_cb(uv_timer_t* handle, int status) {
-  int r;
-
   ASSERT(handle == &timer);
   ASSERT(status == 0);
   ASSERT(nested == 0 && "timer_cb must be called from a fresh stack");
@@ -127,8 +123,7 @@ static void timer_cb(uv_timer_t* handle, int status) {
 
   timer_cb_called++;
 
-  r = uv_close((uv_handle_t*)handle, close_cb);
-  ASSERT(r == 0);
+  uv_close((uv_handle_t*)handle, close_cb);
 }
 
 
@@ -145,7 +140,7 @@ static void write_cb(uv_write_t* req, int status) {
   /* back to our receive buffer when we start reading. This maximizes the */
   /* tempation for the backend to use dirty stack for calling read_cb. */
   nested++;
-  r = uv_timer_init(&timer);
+  r = uv_timer_init(uv_default_loop(), &timer);
   ASSERT(r == 0);
   r = uv_timer_start(&timer, timer_cb, 500, 0);
   ASSERT(r == 0);
@@ -181,9 +176,7 @@ static void connect_cb(uv_connect_t* req, int status) {
 TEST_IMPL(callback_stack) {
   struct sockaddr_in addr = uv_ip4_addr("127.0.0.1", TEST_PORT);
 
-  uv_init();
-
-  if (uv_tcp_init(&client)) {
+  if (uv_tcp_init(uv_default_loop(), &client)) {
     FATAL("uv_tcp_init failed");
   }
 
@@ -196,7 +189,7 @@ TEST_IMPL(callback_stack) {
   }
   nested--;
 
-  uv_run();
+  uv_run(uv_default_loop());
 
   ASSERT(nested == 0);
   ASSERT(connect_cb_called == 1 && "connect_cb must be called exactly once");
