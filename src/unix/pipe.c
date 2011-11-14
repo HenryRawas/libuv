@@ -29,10 +29,12 @@
 #include <unistd.h>
 #include <stdlib.h>
 
-int uv_pipe_init(uv_loop_t* loop, uv_pipe_t* handle) {
+
+int uv_pipe_init(uv_loop_t* loop, uv_pipe_t* handle, int ipc) {
   uv__stream_init(loop, (uv_stream_t*)handle, UV_NAMED_PIPE);
   loop->counters.pipe_init++;
   handle->pipe_fname = NULL;
+  handle->ipc = ipc;
   return 0;
 }
 
@@ -175,7 +177,7 @@ void uv_pipe_open(uv_pipe_t* handle, uv_file fd) {
 }
 
 
-int uv_pipe_connect(uv_connect_t* req,
+void uv_pipe_connect(uv_connect_t* req,
                     uv_pipe_t* handle,
                     const char* name,
                     uv_connect_cb cb) {
@@ -207,7 +209,7 @@ int uv_pipe_connect(uv_connect_t* req,
   while (r == -1 && errno == EINTR);
 
   if (r == -1) {
-    uv__set_sys_error(handle->loop, errno);
+    status = errno;
     uv__close(sockfd);
     goto out;
   }
@@ -235,7 +237,6 @@ out:
    * return 0 and let the callback handle errors.
    */
   errno = saved_errno;
-  return 0;
 }
 
 
